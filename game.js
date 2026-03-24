@@ -8,7 +8,7 @@ let lastTime = 0;
 let gameState = {
     screen: 'menu',
     distance: 0,
-    trackLength: 10000, // Distance to finish
+    trackLength: 30000, 
     carX: 0,
     carY: 0,
     speed: 0,
@@ -17,16 +17,37 @@ let gameState = {
     durability: 100,
     paused: false,
     markersPassed: 0,
-    trafficLights: [], // Positions of stop lights
+    trafficLights: [], 
     currentQuestion: null,
     questionTimer: 0,
-    questionActive: false
+    questionActive: false,
+    keys: {
+        forward: false,
+        backward: false,
+        left: false,
+        right: false
+    }
 };
+
+// Keyboard Listeners
+window.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowUp' || e.key === 'w') gameState.keys.forward = true;
+    if (e.key === 'ArrowDown' || e.key === 's') gameState.keys.backward = true;
+    if (e.key === 'ArrowLeft' || e.key === 'a') gameState.keys.left = true;
+    if (e.key === 'ArrowRight' || e.key === 'd') gameState.keys.right = true;
+});
+
+window.addEventListener('keyup', (e) => {
+    if (e.key === 'ArrowUp' || e.key === 'w') gameState.keys.forward = false;
+    if (e.key === 'ArrowDown' || e.key === 's') gameState.keys.backward = false;
+    if (e.key === 'ArrowLeft' || e.key === 'a') gameState.keys.left = false;
+    if (e.key === 'ArrowRight' || e.key === 'd') gameState.keys.right = false;
+});
 
 // Markers (traffic lights) - generated every X distance
 function generateTrackLights() {
     gameState.trafficLights = [];
-    let lightCount = 5; // 5 stops per race
+    let lightCount = 3; // Even fewer stops
     let interval = gameState.trackLength / (lightCount + 1);
     for (let i = 1; i <= lightCount; i++) {
         gameState.trafficLights.push({
@@ -199,23 +220,51 @@ function gameLoop(time) {
     if (gameState.screen !== 'game-screen') return;
     
     let deltaTime = (time - lastTime) / 1000;
+    if (deltaTime > 0.1) deltaTime = 0.1; // Cap dt
     lastTime = time;
 
     if (!gameState.questionActive && !gameState.paused) {
-        if (gameState.speed < gameState.maxSpeed) {
+        // --- Controls & Physics ---
+        if (gameState.keys.forward) {
             gameState.speed += gameState.acceleration;
+        } else if (gameState.keys.backward) {
+            gameState.speed -= gameState.acceleration * 2; // Decel
+        } else {
+            // Friction
+            gameState.speed *= 0.98;
         }
-        
+
+        // Limit Speed
+        if (gameState.speed > gameState.maxSpeed) gameState.speed = gameState.maxSpeed;
+        if (gameState.speed < -gameState.maxSpeed / 2) gameState.speed = -gameState.maxSpeed / 2;
+
+        // Steering
+        if (gameState.speed !== 0) {
+            const steeringSpeed = 5 * (Math.abs(gameState.speed) / gameState.maxSpeed + 0.5);
+            if (gameState.keys.left) gameState.carX -= steeringSpeed;
+            if (gameState.keys.right) gameState.carX += steeringSpeed;
+        }
+
+        // Road Limits (Collision)
+        const roadWidth = 400;
+        const roadX = (canvas.width - roadWidth) / 2;
+        if (gameState.carX < roadX + 30) gameState.carX = roadX + 30;
+        if (gameState.carX > roadX + roadWidth - 30) gameState.carX = roadX + roadWidth - 30;
+
+        // Progress Distance
         gameState.distance += gameState.speed;
+        if (gameState.distance < 0) gameState.distance = 0;
         
+        // Traffic Light Trigger
         gameState.trafficLights.forEach(light => {
-            if (!light.passed && gameState.distance >= light.pos) {
+            if (!light.passed && gameState.distance >= light.pos + 20) {
                 light.passed = true;
                 gameState.speed = 0;
                 showQuestion();
             }
         });
 
+        // Finish Line
         if (gameState.distance >= gameState.trackLength) {
             endGame(true);
             return;

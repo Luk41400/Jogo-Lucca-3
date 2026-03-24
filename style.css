@@ -79,6 +79,7 @@ body {
     letter-spacing: -2px;
     background: linear-gradient(135deg, #fff 0%, var(--primary) 100%);
     -webkit-background-clip: text;
+    background-clip: text;
     -webkit-text-fill-color: transparent;
     filter: drop-shadow(var(--neon-text));
     margin-bottom: 1rem;
@@ -196,6 +197,19 @@ button {
     left: 50%;
     transform: translateX(-50%);
     font-size: 1.5rem;
+}
+
+.controls-hint {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.5);
+    padding: 10px 20px;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    color: var(--primary);
+    border: 1px solid var(--glass-border);
 }
 
 /* --- Hud Items --- */
