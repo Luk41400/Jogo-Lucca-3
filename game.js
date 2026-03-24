@@ -18,6 +18,7 @@ let gameState = {
     paused: false,
     markersPassed: 0,
     trafficLights: [], 
+    obstacles: [],
     currentQuestion: null,
     questionTimer: 0,
     questionActive: false,
@@ -31,29 +32,73 @@ let gameState = {
 
 // Keyboard Listeners
 window.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowUp' || e.key === 'w') gameState.keys.forward = true;
-    if (e.key === 'ArrowDown' || e.key === 's') gameState.keys.backward = true;
-    if (e.key === 'ArrowLeft' || e.key === 'a') gameState.keys.left = true;
-    if (e.key === 'ArrowRight' || e.key === 'd') gameState.keys.right = true;
+    const k = e.key.toLowerCase();
+    const c = e.code;
+    if (k === 'arrowup' || k === 'w' || c === 'KeyW') gameState.keys.forward = true;
+    if (k === 'arrowdown' || k === 's' || c === 'KeyS') gameState.keys.backward = true;
+    if (k === 'arrowleft' || k === 'a' || c === 'KeyA') gameState.keys.left = true;
+    if (k === 'arrowright' || k === 'd' || c === 'KeyD') gameState.keys.right = true;
 });
 
 window.addEventListener('keyup', (e) => {
-    if (e.key === 'ArrowUp' || e.key === 'w') gameState.keys.forward = false;
-    if (e.key === 'ArrowDown' || e.key === 's') gameState.keys.backward = false;
-    if (e.key === 'ArrowLeft' || e.key === 'a') gameState.keys.left = false;
-    if (e.key === 'ArrowRight' || e.key === 'd') gameState.keys.right = false;
+    const k = e.key.toLowerCase();
+    const c = e.code;
+    if (k === 'arrowup' || k === 'w' || c === 'KeyW') gameState.keys.forward = false;
+    if (k === 'arrowdown' || k === 's' || c === 'KeyS') gameState.keys.backward = false;
+    if (k === 'arrowleft' || k === 'a' || c === 'KeyA') gameState.keys.left = false;
+    if (k === 'arrowright' || k === 'd' || c === 'KeyD') gameState.keys.right = false;
 });
 
-// Markers (traffic lights) - generated every X distance
+// On-screen Control Listeners
+function setupTouchControls() {
+    const setupBtn = (id, property) => {
+        const btn = document.getElementById(id);
+        const start = (e) => { e.preventDefault(); gameState.keys[property] = true; };
+        const end = (e) => { e.preventDefault(); gameState.keys[property] = false; };
+        btn.addEventListener('mousedown', start, {passive: false});
+        btn.addEventListener('mouseup', end, {passive: false});
+        btn.addEventListener('mouseleave', end, {passive: false});
+        btn.addEventListener('touchstart', start, {passive: false});
+        btn.addEventListener('touchend', end, {passive: false});
+    };
+    setupBtn('ctrl-up', 'forward');
+    setupBtn('ctrl-down', 'backward');
+    setupBtn('ctrl-left', 'left');
+    setupBtn('ctrl-right', 'right');
+}
+
+// Markers & Obstacles
+function generateTrackData() {
+    generateTrackLights();
+    generateObstacles();
+}
+
 function generateTrackLights() {
     gameState.trafficLights = [];
-    let lightCount = 3; // Even fewer stops
+    let lightCount = 3; 
     let interval = gameState.trackLength / (lightCount + 1);
     for (let i = 1; i <= lightCount; i++) {
         gameState.trafficLights.push({
             pos: i * interval,
             passed: false,
             active: false
+        });
+    }
+}
+
+function generateObstacles() {
+    gameState.obstacles = [];
+    const roadWidth = 400;
+    
+    for (let d = 2000; d < gameState.trackLength - 1000; d += (1200 + Math.random() * 800)) {
+        const nearLight = gameState.trafficLights.some(l => Math.abs(l.pos - d) < 600);
+        if (nearLight) continue;
+
+        gameState.obstacles.push({
+            pos: d,
+            relX: (Math.random() - 0.5) * 280,
+            type: Math.random() > 0.5 ? 'cone' : 'hole',
+            hit: false
         });
     }
 }
@@ -123,7 +168,11 @@ let carImage = new Image();
 
 function startRace() {
     const car = getCurrentCar();
-    carImage.src = car.image;
+    const tempImg = new Image();
+    tempImg.src = car.image;
+    tempImg.onload = () => {
+        carImage.src = removeImageBackground(tempImg);
+    };
     
     gameState.distance = 0;
     gameState.speed = 0;
@@ -132,12 +181,38 @@ function startRace() {
     gameState.durability = 100;
     gameState.paused = false;
     gameState.questionActive = false;
-    generateTrackLights();
+    generateTrackData();
     
     switchScreen('game-screen');
     resizeCanvas();
     lastTime = performance.now();
     gameLoop(lastTime);
+}
+
+function removeImageBackground(img) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    ctx.drawImage(img, 0, 0);
+    
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    
+    // Background removal logic (targets dark grays/near-blacks)
+    for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i+1];
+        const b = data[i+2];
+        
+        // If color is close to the typical dark gray background (#1a1a1a to #333333)
+        if (r < 60 && g < 60 && b < 60) {
+            data[i+3] = 0; // Set alpha to 0 (transparent)
+        }
+    }
+    
+    ctx.putImageData(imageData, 0, 0);
+    return canvas.toDataURL();
 }
 
 function resizeCanvas() {
@@ -264,6 +339,23 @@ function gameLoop(time) {
             }
         });
 
+        // Obstacle Collision
+        gameState.obstacles.forEach(obs => {
+            if (!obs.hit) {
+                // Check if car passed the obstacle pos (moving up means distance is increasing)
+                const absX = (canvas.width / 2) + obs.relX;
+                
+                // Collision check (bounding box)
+                if (Math.abs(gameState.distance - obs.pos) < 50 && Math.abs(gameState.carX - absX) < 40) {
+                    obs.hit = true;
+                    gameState.durability = Math.max(0, gameState.durability - 15);
+                    gameState.speed *= 0.5; // Slow down on hit
+                    updateHud();
+                    if (gameState.durability <= 0) endGame(false);
+                }
+            }
+        });
+
         // Finish Line
         if (gameState.distance >= gameState.trackLength) {
             endGame(true);
@@ -329,7 +421,34 @@ function renderTrack() {
     ctx.moveTo(canvas.width / 2, -offset);
     ctx.lineTo(canvas.width / 2, canvas.height);
     ctx.stroke();
+    ctx.stroke();
     ctx.setLineDash([]);
+
+    // Obstacles
+    gameState.obstacles.forEach(obs => {
+        const y = gameState.carY - (obs.pos - gameState.distance);
+        // Only draw if on screen
+        if (y > -50 && y < canvas.height + 50) {
+            const x = (canvas.width / 2) + obs.relX;
+            if (obs.type === 'cone') {
+                ctx.fillStyle = obs.hit ? '#555' : '#ff9900';
+                ctx.beginPath();
+                ctx.moveTo(x, y - 20);
+                ctx.lineTo(x - 15, y + 20);
+                ctx.lineTo(x + 15, y + 20);
+                ctx.fill();
+            } else {
+                ctx.fillStyle = obs.hit ? '#333' : '#000';
+                ctx.beginPath();
+                ctx.ellipse(x, y, 30, 20, 0, 0, Math.PI * 2);
+                ctx.fill();
+                if (!obs.hit) {
+                    ctx.strokeStyle = '#333';
+                    ctx.stroke();
+                }
+            }
+        }
+    });
     
     // Car
     drawCar(gameState.carX, gameState.carY);
@@ -377,6 +496,7 @@ function endGame(won) {
 window.onload = () => {
     loadState();
     updateUI();
+    setupTouchControls();
     
     document.getElementById('start-btn').onclick = () => startRace();
     document.getElementById('garage-btn').onclick = () => switchScreen('garage-screen');
